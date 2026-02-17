@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Учёт оплат</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      max-width: 1000px;
+      margin: 20px auto;
+      padding: 0 15px;
+      background: #f9f9f9;
+    }
+    h1 { text-align: center; color: #2c3e50; }
+    .grid {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: 24px;
+    }
+    .card {
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    form { display: grid; gap: 12px; }
+    input, select, button {
+      padding: 10px;
+      font-size: 15px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+    }
+    button { cursor: pointer; font-weight: 500; }
+    #save { background: #27ae60; color: white; border: none; }
+    #reset { background: #7f8c8d; color: white; border: none; }
+    table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+    th, td { border: 1px solid #e0e0e0; padding: 10px; text-align: left; }
+    th { background: #ecf0f1; }
+    .actions button { font-size: 18px; border: none; background: none; cursor: pointer; margin-right: 8px; }
+    .stats { margin: 12px 0; font-size: 1.05em; line-height: 1.5; }
+    .error { color: #c0392b; font-size: 0.9em; min-height: 1.2em; }
+    .filters { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+    .filters input, .filters select { flex: 1; min-width: 140px; }
+    @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+
+<h1>Учёт оплат</h1>
+
+<div class="grid">
+  <div class="card">
+    <h2>Добавить / изменить платёж</h2>
+    <form id="form">
+      <input id="title" placeholder="ФИО студента" required autofocus>
+      <input id="category" placeholder="Тип оплаты (обучение, общежитие…)">
+      <input id="price" type="number" placeholder="Сумма (тг)" min="0" step="1" required>
+      <select id="status" required>
+        <option value="оплачено" selected>оплачено</option>
+        <option value="ожидает">ожидает</option>
+        <option value="отмена">отмена</option>
+      </select>
+      <div id="msg" class="error"></div>
+      <div style="display:flex; gap:10px;">
+        <button type="submit" id="save">Сохранить</button>
+        <button type="button" id="reset">Сброс</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Список платежей</h2>
+
+    <div class="stats" id="stats"></div>
+
+    <div class="filters">
+      <input id="search" placeholder="Поиск по студенту…">
+      <select id="fstatus">
+        <option value="all">Все статусы</option>
+        <option value="оплачено">оплачено</option>
+        <option value="ожидает">ожидает</option>
+        <option value="отмена">отмена</option>
+      </select>
+      <select id="fsort">
+        <option value="none">Без сортировки</option>
+        <option value="asc">Сумма ↑</option>
+        <option value="desc">Сумма ↓</option>
+      </select>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>№</th>
+          <th>Студент</th>
+          <th>Тип оплаты</th>
+          <th>Сумма</th>
+          <th>Статус</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="list"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+let payments = [];
+let editing = null;
+
+const form     = document.getElementById('form');
+const title    = document.getElementById('title');
+const category = document.getElementById('category');
+const price    = document.getElementById('price');
+const status   = document.getElementById('status');
+const msg      = document.getElementById('msg');
+const saveBtn  = document.getElementById('save');
+const resetBtn = document.getElementById('reset');
+
+const search   = document.getElementById('search');
+const fstatus  = document.getElementById('fstatus');
+const fsort    = document.getElementById('fsort');
+const tbody    = document.getElementById('list');
+const stats    = document.getElementById('stats');
+
+function load() {
+  try {
+    const data = localStorage.getItem('payments2025');
+    if (data) payments = JSON.parse(data);
+  } catch {}
+}
+
+function save() {
+  localStorage.setItem('payments2025', JSON.stringify(payments));
+}
+
+function getFiltered() {
+  let list = [...payments];
+
+  const q = search.value.trim().toLowerCase();
+  if (q) list = list.filter(p => p.title.toLowerCase().includes(q));
+
+  const st = fstatus.value;
+  if (st !== 'all') list = list.filter(p => p.status === st);
+
+  const s = fsort.value;
+  if (s === 'asc')  list.sort((a,b) => a.price - b.price);
+  if (s === 'desc') list.sort((a,b) => b.price - a.price);
+
+  return list;
+}
+
+function render() {
+  const items = getFiltered();
+
+  tbody.innerHTML = '';
+  items.forEach((p, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${i+1}</td>
+      <td>${p.title}</td>
+      <td>${p.category || '—'}</td>
+      <td>${p.price.toLocaleString()} тг</td>
+      <td>${p.status}</td>
+      <td class="actions">
+        <button onclick="edit(${p.id})">✎</button>
+        <button onclick="remove(${p.id})">×</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  const total = payments.length;
+  const sum = payments.reduce((a,c) => a + c.price, 0);
+  const avg = total ? Math.round(sum / total) : 0;
+  const cnt = { 'оплачено':0, 'ожидает':0, 'отмена':0 };
+  payments.forEach(p => cnt[p.status]++);
+
+  stats.innerHTML = `
+    Всего записей: <b>${total}</b> | 
+    Общая сумма: <b>${sum.toLocaleString()} тг</b><br>
+    Средняя оплата: <b>${avg.toLocaleString()} тг</b><br>
+    Оплачено: <b>${cnt['оплачено']}</b> • 
+    Ожидает: <b>${cnt['ожидает']}</b> • 
+    Отменено: <b>${cnt['отмена']}</b>
+  `;
+}
+
+form.addEventListener('submit', e => {
+  e.preventDefault();
+  msg.textContent = '';
+
+  const t = title.value.trim();
+  if (!t) { msg.textContent = 'Введите ФИО студента'; title.focus(); return; }
+
+  const p = Number(price.value);
+  if (!p && p !== 0 || p < 0) {
+    msg.textContent = 'Сумма должна быть ≥ 0';
+    price.focus(); return;
+  }
+
+  const payment = {
+    id: editing || Date.now(),
+    title: t,
+    category: category.value.trim(),
+    price: p,
+    status: status.value
+  };
+
+  if (editing) {
+    const idx = payments.findIndex(x => x.id === editing);
+    if (idx !== -1) payments[idx] = payment;
+  } else {
+    payments.push(payment);
+  }
+
+  save();
+  render();
+  resetForm();
+});
+
+function resetForm() {
+  form.reset();
+  editing = null;
+  saveBtn.textContent = 'Сохранить';
+  msg.textContent = '';
+  title.focus();
+}
+
+window.edit = id => {
+  const p = payments.find(x => x.id === id);
+  if (!p) return;
+  editing = id;
+  title.value    = p.title;
+  category.value = p.category || '';
+  price.value    = p.price;
+  status.value   = p.status;
+  saveBtn.textContent = 'Обновить';
+  title.focus();
+};
+
+window.remove = id => {
+  if (!confirm('Удалить запись?')) return;
+  payments = payments.filter(p => p.id !== id);
+  if (editing === id) resetForm();
+  save();
+  render();
+};
+
+resetBtn.onclick = resetForm;
+search.oninput   = render;
+fstatus.onchange = render;
+fsort.onchange   = render;
+
+load();
+render();
+</script>
+
+</body>
+</html>
